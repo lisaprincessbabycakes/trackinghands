@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Living Thread — AR</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,100;1,9..144,200&family=DM+Mono&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  width:100%;height:100%;
+  overflow:hidden;
+  background:#030208;
+  font-family:'DM Mono',monospace;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── AR container ── */
+#ar-container{
+  position:fixed;inset:0;z-index:0;
+  width:100%;height:100%;
+}
+/* MindAR injects video + canvas — force them fullscreen */
+#ar-container > video{
+  position:fixed!important;
+  top:0!important;left:0!important;
+  width:100%!important;height:100%!important;
+  object-fit:cover!important;
+  z-index:1!important;
+}
+#ar-container > canvas{
+  position:fixed!important;
+  top:0!important;left:0!important;
+  width:100%!important;height:100%!important;
+  z-index:2!important;
+}
+
+/* ── UI layer ── */
+#ui{
+  position:fixed;inset:0;z-index:30;
+  pointer-events:none;
+}
+
+/* ── ONBOARD ── */
+#onboard{
+  position:fixed;inset:0;z-index:50;
+  background:radial-gradient(ellipse 100% 90% at 50% 55%,#09061a,#000);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:16px;padding:48px 36px;text-align:center;
+  transition:opacity .8s;
+}
+#onboard h1{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:100;
+  font-size:clamp(42px,12vw,80px);line-height:.9;color:#fff;
+  letter-spacing:-.01em;
+}
+#onboard h1 small{
+  display:block;font-family:'DM Mono',monospace;font-style:normal;
+  font-size:.25em;letter-spacing:.3em;text-transform:uppercase;
+  color:rgba(255,255,255,.2);margin-top:14px;
+}
+#onboard .hint{
+  font-size:9px;letter-spacing:.22em;text-transform:uppercase;
+  color:rgba(255,255,255,.2);line-height:2.6;max-width:260px;
+}
+#start-btn{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:100;
+  font-size:20px;letter-spacing:.08em;
+  background:transparent;
+  border:1px solid rgba(168,240,198,.3);
+  color:rgba(168,240,198,.8);
+  padding:15px 48px;border-radius:100px;
+  cursor:pointer;transition:all .3s;
+  pointer-events:all;margin-top:6px;
+  -webkit-tap-highlight-color:transparent;
+}
+#start-btn:active{
+  background:rgba(168,240,198,.08);
+  border-color:#a8f0c6;color:#a8f0c6;
+}
+
+/* ── ERROR SCREEN ── */
+#error-screen{
+  position:fixed;inset:0;z-index:60;
+  background:#030208;
+  display:none;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:14px;padding:40px;text-align:center;
+}
+#error-screen h2{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:100;
+  font-size:28px;color:#ffb3c6;
+}
+#error-screen p{
+  font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  color:rgba(255,255,255,.3);line-height:2.4;max-width:280px;
+}
+#error-screen button{
+  margin-top:8px;font-family:'DM Mono',monospace;font-size:9px;
+  letter-spacing:.2em;text-transform:uppercase;
+  background:transparent;border:1px solid rgba(255,179,198,.3);
+  color:#ffb3c6;padding:10px 28px;border-radius:100px;
+  cursor:pointer;pointer-events:all;
+}
+
+/* ── LOADING ── */
+#loading{
+  position:fixed;inset:0;z-index:45;
+  background:rgba(3,2,8,.92);
+  display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;
+}
+#loading-ring{
+  width:48px;height:48px;border-radius:50%;
+  border:1.5px solid rgba(168,240,198,.15);
+  border-top-color:#a8f0c6;
+  animation:spin .9s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading p{
+  font-size:8px;letter-spacing:.28em;text-transform:uppercase;
+  color:rgba(168,240,198,.5);
+}
+
+/* ── SCAN HINT (shown after camera starts, before target found) ── */
+#scan-hint{
+  position:absolute;bottom:0;left:0;right:0;
+  padding:20px 32px 52px;
+  background:linear-gradient(transparent,rgba(0,0,0,.75));
+  text-align:center;transition:opacity .6s;
+}
+#scan-ring{
+  width:60px;height:60px;border-radius:50%;
+  border:1.5px solid rgba(168,240,198,.35);
+  margin:0 auto 14px;
+  animation:pulse-ring 2.2s ease-out infinite;
+}
+@keyframes pulse-ring{
+  0%{transform:scale(.75);opacity:0}
+  35%{opacity:1}
+  100%{transform:scale(1.7);opacity:0}
+}
+#scan-hint p{
+  font-size:8px;letter-spacing:.25em;text-transform:uppercase;
+  color:rgba(255,255,255,.3);
+}
+
+/* ── STATE BADGE ── */
+#state-badge{
+  position:absolute;top:env(safe-area-inset-top, 24px);
+  left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:8px;
+  background:rgba(0,0,0,.5);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,.1);border-radius:100px;
+  padding:8px 20px;opacity:0;transition:opacity .8s,border-color 1.5s;
+}
+#state-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:#a8f0c6;transition:background 1.5s;
+  animation:blink 2.2s infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+#state-word{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:100;
+  font-size:16px;color:#a8f0c6;transition:color 1.5s;letter-spacing:.05em;
+}
+
+/* ── DATA STRIP ── */
+#data-strip{
+  position:absolute;bottom:0;left:0;right:0;
+  padding:14px 20px calc(env(safe-area-inset-bottom,0px) + 28px);
+  background:linear-gradient(transparent,rgba(0,0,0,.72));
+  display:flex;gap:0;justify-content:space-around;
+  opacity:0;transition:opacity .8s;
+}
+.ds{display:flex;flex-direction:column;align-items:center;gap:3px;}
+.ds-l{font-size:6px;letter-spacing:.22em;text-transform:uppercase;color:rgba(255,255,255,.22);}
+.ds-v{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:100;
+  font-size:18px;line-height:1;color:#fff;
+}
+
+/* ── FOUND FLASH ── */
+#found-flash{
+  position:fixed;inset:0;z-index:5;
+  background:rgba(168,240,198,.07);
+  pointer-events:none;opacity:0;
+  transition:opacity .25s;
+}
+</style>
+</head>
+<body>
+
+<!-- ONBOARD -->
+<div id="onboard">
+  <h1>Living<br>Thread<small>ar experience</small></h1>
+  <p class="hint">Point your camera at<br>the crochet piece to<br>see its story grow</p>
+  <button id="start-btn" onclick="startAR()">open camera →</button>
+  <p class="hint" style="font-size:7px;margin-top:4px;">
+    iPhone: use Safari · Android: use Chrome
+  </p>
+</div>
+
+<!-- LOADING -->
+<div id="loading">
+  <div id="loading-ring"></div>
+  <p id="loading-msg">requesting camera…</p>
+</div>
+
+<!-- ERROR -->
+<div id="error-screen">
+  <h2 id="error-title">Something went wrong</h2>
+  <p id="error-msg">An error occurred. Please try again.</p>
+  <button onclick="location.reload()">try again</button>
+</div>
+
+<!-- AR -->
+<div id="ar-container"></div>
+
+<!-- FOUND FLASH -->
+<div id="found-flash"></div>
+
+<!-- UI -->
+<div id="ui">
+  <div id="state-badge">
+    <div id="state-dot"></div>
+    <div id="state-word">flow</div>
+  </div>
+  <div id="scan-hint" style="display:none">
+    <div id="scan-ring"></div>
+    <p>point at the crochet piece</p>
+  </div>
+  <div id="data-strip">
+    <div class="ds"><span class="ds-l">stitches</span><span class="ds-v" id="ds-s" style="color:#fff">—</span></div>
+    <div class="ds"><span class="ds-l">flow</span><span class="ds-v" id="ds-f" style="color:#a8f0c6">—</span></div>
+    <div class="ds"><span class="ds-l">rest</span><span class="ds-v" id="ds-r" style="color:#ffd3a5">—</span></div>
+    <div class="ds"><span class="ds-l">burnout</span><span class="ds-v" id="ds-b" style="color:#ffb3c6">—</span></div>
+  </div>
+</div>
+
+<!-- THREE.JS r128 — version MindAR requires -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+
+<!-- MIND AR — must load AFTER three.js, use aframe-less build that exposes window.MINDAR -->
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════
+// SESSION DATA — paste your recorded data here
+// ═══════════════════════════════════════════════════════
+const SESSION = {
+  stitches:      247,
+  duration:      '1h 23m',
+  flowCount:     14,
+  restCount:     8,
+  burnCount:     3,
+  peakVel:       78,
+  peakRhythm:    89,
+  dominantState: 'flow', // 'flow' | 'rest' | 'burnout'
+};
+
+// Visual parameters derived from data
+const VIZ = {
+  density:  Math.min(1, SESSION.stitches / 400),
+  height:   Math.min(1, SESSION.flowCount / 20),
+  chaos:    Math.min(1, SESSION.burnCount / 10),
+  calm:     Math.min(1, SESSION.restCount / 15),
+  symmetry: SESSION.peakRhythm / 100,
+};
+
+// Colours
+const COLORS = {
+  flow:    new THREE.Color(0xa8f0c6),
+  rest:    new THREE.Color(0xffd3a5),
+  burnout: new THREE.Color(0xffb3c6),
+};
+const baseColor = COLORS[SESSION.dominantState] || COLORS.flow;
+
+// ── state names → hex for CSS ──
+const STATE_HEX = {flow:'#a8f0c6', rest:'#ffd3a5', burnout:'#ffb3c6'};
+
+// ═══════════════════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════════════════
+function showLoading(msg='loading…'){
+  document.getElementById('loading').style.display='flex';
+  document.getElementById('loading-msg').textContent=msg;
+}
+function hideLoading(){
+  document.getElementById('loading').style.display='none';
+}
+function showError(msg, title='Something went wrong'){
+  hideLoading();
+  const es=document.getElementById('error-screen');
+  es.style.display='flex';
+  document.getElementById('error-title').textContent=title;
+  document.getElementById('error-msg').textContent=msg;
+}
+function setStateBadge(st){
+  const c=STATE_HEX[st]||'#a8f0c6';
+  document.getElementById('state-word').textContent=st;
+  document.getElementById('state-word').style.color=c;
+  document.getElementById('state-dot').style.background=c;
+}
+function populateData(){
+  document.getElementById('ds-s').textContent=SESSION.stitches.toLocaleString();
+  document.getElementById('ds-f').textContent=SESSION.flowCount;
+  document.getElementById('ds-r').textContent=SESSION.restCount;
+  document.getElementById('ds-b').textContent=SESSION.burnCount;
+}
+
+// ═══════════════════════════════════════════════════════
+// MAIN — startAR
+// ═══════════════════════════════════════════════════════
+async function startAR(){
+  // hide onboard immediately
+  const ob=document.getElementById('onboard');
+  ob.style.opacity='0';
+  ob.style.pointerEvents='none';
+  setTimeout(()=>ob.style.display='none',900);
+
+  populateData();
+  showLoading('requesting camera…');
+
+  // ── STEP 1: explicitly request camera BEFORE MindAR ──
+  // This ensures the browser permission dialog appears
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{
+        facingMode:{ideal:'environment'}, // rear camera
+        width:{ideal:1280},
+        height:{ideal:720},
+      },
+      audio:false
+    });
+    // immediately stop — MindAR will start its own stream
+    stream.getTracks().forEach(t=>t.stop());
+  }catch(err){
+    console.error('Camera error:',err);
+    if(err.name==='NotAllowedError'||err.name==='PermissionDeniedError'){
+      showError('Tap "try again" and allow camera access when asked.\n\niPhone: open this page in Safari, not Chrome.\nAndroid: open in Chrome and tap Allow.', 'Camera blocked');
+    } else if(err.name==='NotFoundError'){
+      showError('No camera was found on this device.', 'No camera');
+    } else {
+      showError('Camera error: '+err.message+'\n\nTry refreshing or switching browsers.', 'Camera error');
+    }
+    return;
+  }
+
+  // ── STEP 2: verify MindAR loaded correctly ──
+  if(!window.MINDAR || !window.MINDAR.IMAGE || !window.MINDAR.IMAGE.MindARThree){
+    showError('AR library failed to load.\n\nCheck your internet connection and reload the page.\n\nIf this keeps happening, try a different browser.');
+    return;
+  }
+
+  showLoading('loading 3D experience…');
+
+  // ── STEP 3: init MindAR ──
+  let mindarThree;
+  try{
+    mindarThree = new window.MINDAR.IMAGE.MindARThree({
+      container:        document.querySelector('#ar-container'),
+      imageTargetSrc:   'targets.mind',
+      maxTrack:         1,
+      uiLoading:        'no',
+      uiScanning:       'no',
+      uiError:          'no',
+      filterMinCF:      0.001,
+      filterBeta:       0.001,
+      warmupTolerance:  5,
+      missTolerance:    5,
+    });
+  }catch(err){
+    showError('Could not start AR engine.\n\n'+err.message);
+    return;
+  }
+
+  const {renderer, scene, camera} = mindarThree;
+
+  // make renderer fill the screen properly
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.domElement.style.position='fixed';
+  renderer.domElement.style.top='0';
+  renderer.domElement.style.left='0';
+  renderer.domElement.style.width='100%';
+  renderer.domElement.style.height='100%';
+
+  // ── STEP 4: build 3D scene ──
+  const anchor = mindarThree.addAnchor(0);
+  const clock  = new THREE.Clock();
+  let animT=0, targetFound=false;
+
+  buildScene(anchor, scene);
+
+  // ── STEP 5: target events ──
+  anchor.onTargetFound = ()=>{
+    targetFound=true;
+    document.getElementById('scan-hint').style.opacity='0';
+    document.getElementById('state-badge').style.opacity='1';
+    document.getElementById('data-strip').style.opacity='1';
+    anchor.group.visible=true;
+    const fl=document.getElementById('found-flash');
+    fl.style.opacity='1';
+    setTimeout(()=>fl.style.opacity='0',350);
+  };
+  anchor.onTargetLost = ()=>{
+    targetFound=false;
+    document.getElementById('scan-hint').style.opacity='1';
+    document.getElementById('state-badge').style.opacity='0';
+    document.getElementById('data-strip').style.opacity='0';
+  };
+
+  // hide anchor group until found
+  anchor.group.visible=false;
+  setStateBadge(SESSION.dominantState);
+
+  // ── STEP 6: render loop ──
+  renderer.setAnimationLoop(()=>{
+    const delta=Math.min(clock.getDelta(),.05);
+    animT+=delta;
+    if(targetFound) animateScene(anchor, animT, delta);
+    renderer.render(scene, camera);
+  });
+
+  // ── STEP 7: start MindAR (starts camera internally) ──
+  try{
+    await mindarThree.start();
+    hideLoading();
+    document.getElementById('scan-hint').style.display='block';
+    // poll live state from AR page if running
+    setInterval(pollLiveState,1200);
+  }catch(err){
+    showError('AR failed to start.\n\n'+err.message+'\n\nMake sure targets.mind is in the same folder as this file and the site is hosted over HTTPS.');
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// 3D SCENE
+// ═══════════════════════════════════════════════════════
+let tendrilMeshes=[], sporeSystem, groundGlow;
+
+function buildScene(anchor, scene){
+  // ambient + point lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  const pt=new THREE.PointLight(baseColor, 2.2, 2.5);
+  pt.position.set(0,.4,.3);
+  anchor.group.add(pt);
+
+  // ground glow plane (sits on the marker surface)
+  const glowGeo=new THREE.PlaneGeometry(1.2,1.2);
+  const glowMat=new THREE.MeshBasicMaterial({
+    color:baseColor,transparent:true,opacity:.05,side:THREE.DoubleSide
+  });
+  groundGlow=new THREE.Mesh(glowGeo,glowMat);
+  groundGlow.rotation.x=-Math.PI/2;
+  groundGlow.position.y=.001;
+  anchor.group.add(groundGlow);
+
+  // tendrils
+  const count=Math.round(6+VIZ.density*16);
+  for(let i=0;i<count;i++){
+    const t=makeTendril(i,count);
+    anchor.group.add(t.group);
+    tendrilMeshes.push(t);
+  }
+
+  // spore particles
+  sporeSystem=makeSpores();
+  anchor.group.add(sporeSystem);
+}
+
+// ── Tendril ──
+function makeTendril(idx,total){
+  const group=new THREE.Group();
+  const angle=(idx/total)*Math.PI*2+(Math.random()-.5)*.5;
+  const spread=.06+Math.random()*.38*(1+VIZ.density*.35);
+  group.position.set(Math.cos(angle)*spread, 0, Math.sin(angle)*spread);
+
+  // path
+  const pts=[];
+  let x=0,y=0,z=0;
+  const lx=Math.cos(angle)*.03*VIZ.chaos, lz=Math.sin(angle)*.03*VIZ.chaos;
+  const segs=7+Math.floor(Math.random()*6);
+  pts.push(new THREE.Vector3(0,0,0));
+  for(let i=0;i<segs;i++){
+    const wob=(Math.random()-.5)*(VIZ.chaos>.4?.022:.007);
+    x+=lx+wob;
+    y+=(0.016+Math.random()*.014)*(1+VIZ.height*1.3);
+    z+=lz+wob*.5;
+    pts.push(new THREE.Vector3(x,y,z));
+  }
+
+  const curve=new THREE.CatmullRomCurve3(pts);
+  const rad=.004+Math.random()*.003;
+  const geo=new THREE.TubeGeometry(curve,segs*3,rad,5,false);
+
+  // colour — mix base with alt state based on chaos
+  const altCol=SESSION.burnCount>SESSION.flowCount?COLORS.burnout:COLORS.rest;
+  const col=baseColor.clone().lerp(altCol, VIZ.chaos*.35+Math.random()*.12);
+
+  const mat=new THREE.MeshStandardMaterial({
+    color:col, emissive:col,
+    emissiveIntensity:.55+VIZ.height*.4,
+    roughness:.75, metalness:.05,
+    transparent:true, opacity:.85,
+  });
+  const mesh=new THREE.Mesh(geo,mat);
+  group.add(mesh);
+
+  // branches (flow count drives branching)
+  const bCount=Math.floor(VIZ.height*2+SESSION.flowCount/9);
+  for(let b=0;b<bCount;b++) group.add(makeBranch(pts,col));
+
+  // glowing tip
+  const tipGeo=new THREE.SphereGeometry(rad*2.8,7,7);
+  const tipMat=new THREE.MeshStandardMaterial({
+    color:col,emissive:col,emissiveIntensity:2,transparent:true,opacity:.9
+  });
+  const tip=new THREE.Mesh(tipGeo,tipMat);
+  tip.position.copy(pts[pts.length-1]);
+  group.add(tip);
+
+  return{
+    group,mat,tipMat,tip,
+    baseEI:.55+VIZ.height*.4,
+    phase:Math.random()*Math.PI*2,
+    swayAmp:.003+VIZ.chaos*.007,
+    grown:0,
+    growRate:.3+Math.random()*.5,
+  };
+}
+
+function makeBranch(parentPts, col){
+  const si=Math.floor(parentPts.length*(.3+Math.random()*.45));
+  const sp=parentPts[si].clone();
+  const bPts=[sp.clone()];
+  let bx=sp.x,by=sp.y,bz=sp.z;
+  const bDir=new THREE.Vector3((Math.random()-.5)*.07,.01+Math.random()*.012,(Math.random()-.5)*.07);
+  for(let i=0;i<3+Math.floor(Math.random()*3);i++){
+    bx+=bDir.x+(Math.random()-.5)*.005*VIZ.chaos;
+    by+=bDir.y;
+    bz+=bDir.z+(Math.random()-.5)*.005*VIZ.chaos;
+    bPts.push(new THREE.Vector3(bx,by,bz));
+  }
+  const curve=new THREE.CatmullRomCurve3(bPts);
+  const geo=new THREE.TubeGeometry(curve,bPts.length*2,.002,4,false);
+  const mat=new THREE.MeshStandardMaterial({
+    color:col,emissive:col,emissiveIntensity:.4,transparent:true,opacity:.6
+  });
+  return new THREE.Mesh(geo,mat);
+}
+
+// ── Spores ──
+function makeSpores(){
+  const count=Math.round(50+VIZ.density*100);
+  const geo=new THREE.BufferGeometry();
+  const pos=new Float32Array(count*3);
+  const col=new Float32Array(count*3);
+  const stateKeys=Object.keys(COLORS);
+  for(let i=0;i<count;i++){
+    pos[i*3]  =(Math.random()-.5)*.95;
+    pos[i*3+1]=Math.random()*.7*(1+VIZ.height);
+    pos[i*3+2]=(Math.random()-.5)*.95;
+    const c=COLORS[stateKeys[i%3]];
+    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+  }
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',   new THREE.BufferAttribute(col,3));
+  const mat=new THREE.PointsMaterial({
+    size:.007,vertexColors:true,
+    transparent:true,opacity:.65,sizeAttenuation:true,
+  });
+  return new THREE.Points(geo,mat);
+}
+
+// ═══════════════════════════════════════════════════════
+// ANIMATION
+// ═══════════════════════════════════════════════════════
+function animateScene(anchor, T, dt){
+  // spores float upward
+  if(sporeSystem){
+    const pos=sporeSystem.geometry.attributes.position;
+    const speed=(1-VIZ.calm*.55);
+    for(let i=0;i<pos.count;i++){
+      pos.array[i*3+1]+=dt*(0.01+Math.random()*.007)*speed;
+      pos.array[i*3]  +=Math.sin(T*.45+i*.28)*dt*.003;
+      pos.array[i*3+2]+=Math.cos(T*.38+i*.22)*dt*.003;
+      if(pos.array[i*3+1]>.85*(1+VIZ.height)){
+        pos.array[i*3+1]=0;
+        pos.array[i*3]  =(Math.random()-.5)*.95;
+        pos.array[i*3+2]=(Math.random()-.5)*.95;
+      }
+    }
+    pos.needsUpdate=true;
+    sporeSystem.material.opacity=.45+Math.sin(T*.7)*.18;
+  }
+
+  // tendrils
+  tendrilMeshes.forEach((t,i)=>{
+    // grow in
+    if(t.grown<1){
+      t.grown=Math.min(1,t.grown+dt*t.growRate*.55);
+      t.group.scale.y=t.grown;
+    }
+    // pulse
+    const pSpeed=SESSION.burnCount>5?4.2:1.2+VIZ.calm*.7;
+    const pulse=.5+.5*Math.sin(T*pSpeed+t.phase);
+    t.mat.emissiveIntensity=t.baseEI*(.65+pulse*.55);
+    t.tipMat.emissiveIntensity=1.5+pulse*.9;
+    t.tip.scale.setScalar(.8+pulse*.4);
+    // sway
+    t.group.rotation.x=Math.sin(T*.55+t.phase)*t.swayAmp;
+    t.group.rotation.z=Math.cos(T*.48+t.phase*1.3)*t.swayAmp;
+  });
+
+  // ground glow breathe
+  if(groundGlow) groundGlow.material.opacity=.04+Math.sin(T*.6)*.02;
+}
+
+// ═══════════════════════════════════════════════════════
+// LIVE STATE POLL (reads from AR page if open nearby)
+// ═══════════════════════════════════════════════════════
+function pollLiveState(){
+  try{
+    const raw=localStorage.getItem('living-thread-data');
+    if(raw){
+      const d=JSON.parse(raw);
+      if(d.state) setStateBadge(d.state);
+    }
+  }catch(e){}
+}
+</script>
+</body>
+</html>
